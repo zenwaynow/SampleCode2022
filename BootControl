@@ -1,0 +1,342 @@
+using Leguar.SegmentDisplay;
+using System;
+using System.Collections;
+using System.IO;
+using TMPro;
+using Unity.VisualScripting;
+using UnityEngine;
+using UnityEngine.Device;
+using UnityEngine.UI;
+using UnityEngine.Video;
+using Random = System.Random;
+
+namespace Holowerkz_v1_App_ShareCrafter
+{
+    public class BootControl : MonoBehaviour
+    {
+        //DOTSNET
+        //private NetworkServerAuthoring serverObject = null;
+        //public NetworkServerAuthoring Server => serverObject;
+
+        //private NetworkClientAuthoring clientObject = null;
+        //public NetworkClientAuthoring Client => clientObject;
+
+        [SerializeField] private GameObject _warnPanel;
+
+        [SerializeField] private GameObject _splashCanvas;
+        [SerializeField] private RawImage _backgrndImage;
+
+        [SerializeField] private Sprite _mainSplash;
+        [SerializeField] private Sprite _epilepsySplash;
+        [SerializeField] private Sprite _creditsSplash;
+        [SerializeField] private Sprite[] _splashScreens;
+
+        [SerializeField] private UXCredit _uxCreditPrefab;
+        [SerializeField] private GameObject _creditRootL;
+        [SerializeField] private GameObject _creditRootR;
+
+        [SerializeField] private GameObject _ackButton;
+        [SerializeField] private GameObject _quitBUtton;
+
+
+        [SerializeField] private SegmentDisplayImage _displayImage;
+        [SerializeField] private GameObject _displayBack;
+        [SerializeField] private GameObject _splashyBack;
+
+        [SerializeField] private Toggle _watchItToggle;
+        [SerializeField] private TextMeshProUGUI _watchItLabel;
+
+        private SDController _sdController;
+
+        private bool displaySplash = true;
+
+        private const int splashTimer = 2;
+        private bool msgCompleted = false;
+
+
+        private void Awake()
+        {
+            MainRoot.SetBoot(this);
+
+            _sdController = _displayImage.GetSDController();
+            _sdController.AddCommand(new SetTextCommand("App v0.0.1"));//TODOMJB get the version stamp
+            _sdController.AddCommand(new PauseCommand(3.25f));
+
+            _backgrndImage.gameObject.SetActive(displaySplash);
+            _backgrndImage.texture = _mainSplash.texture;
+            _warnPanel.gameObject.SetActive(false);
+
+            //Debug.Log($"Boot Server status: {serverObject.gameObject.activeInHierarchy}");
+            //Debug.Log($"Boot Client status: {clientObject.gameObject.activeInHierarchy}");
+        }
+
+        private void Start()
+        {
+            Color col = _backgrndImage.material.color;
+            col.a = 1;
+            _backgrndImage.material.color = col;
+
+            if((MainRoot.ProjectHarvest.Current==null) || (MainRoot.ProjectHarvest.Current._Settings==null)) {
+                Debug.Log($"BootControl Start Failed c: {MainRoot.ProjectHarvest.Current != null} s: {MainRoot.ProjectHarvest.Current._Settings!=null}");
+                return;
+            }
+
+            if ((MainRoot.ProjectHarvest.Current._Settings.epilepsyWarning == true) && (MainRoot.ProjectHarvest.Current._Settings.ackWarning == false)) {
+                StartCoroutine(WaitForAcknowledge(_sdController));
+            } else {
+                _sdController.AddCommand(new CallbackCommand(warningMiddle));
+                _sdController.AddCommand((new ScrollTextCommand("YOU HAVE BEEN WARNED!", ScrollTextCommand.Methods.StartOutsideMoveLeftUntilOut, 20f)));
+                _sdController.AddCommand(new SetTextCommand("SHARE CRAFTER"));
+                _sdController.AddCommand(new CallbackCommand(brightenUp));
+                _sdController.AddCommand(new PauseCommand(2.5f));
+                _sdController.AddCommand(new SetTextCommand("Starting up"));
+                _sdController.AddCommand(new CallbackCommand(brightenDown));
+                _sdController.AddCommand(new PauseCommand(1f));
+                _sdController.AddCommand(new CallbackCommand(systemReady));
+                _sdController.AddCommand(new ClearCommand());
+            }
+
+            if (displaySplash == true) {
+                StartCoroutine(WaitForStart());
+            } else {
+                StartCoroutine(WaitForDebug());
+            }
+        }
+
+        private void OnEnable()
+        {
+            _watchItLabel.text = $"Skip It after {MainRoot.ProjectHarvest.Current._Settings.skipItIn} More Watches";
+        }
+
+        public void QuitApp()
+        {
+            _displayImage.gameObject.SetActive(false);
+            _displayBack.SetActive(false);
+            MainRoot.ExtremeMgr.SplashAudio.PlayTune();
+
+            _backgrndImage.texture = _creditsSplash.texture;
+            _backgrndImage.gameObject.SetActive(true);
+            _warnPanel.gameObject.SetActive(false);
+
+            bool isOn = MainRoot.ProjectHarvest.Current._Settings.skipItIn > 0;
+            _watchItToggle.gameObject.SetActive(isOn);
+            _watchItToggle.interactable = isOn;
+
+            StartCoroutine(WaitForCredits());
+        }
+
+        public void EpilepsyAcknowledge()
+        {
+            _warnPanel.gameObject.SetActive(false);
+            MainRoot.ProjectHarvest.Current._Settings.ackWarning = true;
+            MainRoot.ProjectHarvest.SaveProject();
+        }
+
+        public void OnWatchIt_Toggled(bool val)
+        {
+            _watchItToggle.interactable = false;
+
+            if (MainRoot.ProjectHarvest.Current._Settings.skipItIn > 0) {
+                --MainRoot.ProjectHarvest.Current._Settings.skipItIn;
+            }
+
+            if(MainRoot.ProjectHarvest.Current._Settings.skipItIn <= 0) {
+                _watchItLabel.text = "Skip It Now";
+            } else {
+                _watchItLabel.text = $"Skip It after {MainRoot.ProjectHarvest.Current._Settings.skipItIn} More Watches";
+            }
+        }
+
+        private IEnumerator WaitForAcknowledge(SDController _sdController)
+        {
+            _sdController.AddCommand(new CallbackCommand(brightenGo));
+            _sdController.AddCommand(new SetTextCommand("WELCOME!"));
+            _sdController.AddCommand(new PauseCommand(1f));
+            _sdController.AddRepeatingCommand(new CallbackCommand(warningMiddle));
+            _sdController.AddRepeatingCommand(new ScrollTextCommand("PLEASE ACKNOWLEDGE", ScrollTextCommand.Methods.StartOutsideMoveLeftUntilOut, 5f));
+            _sdController.AddRepeatingCommand(new PauseCommand(0.5f));
+            _sdController.AddRepeatingCommand(new CallbackCommand(warningUp));
+            _sdController.AddRepeatingCommand(new SetTextCommand("EPILEPSY WARNING"));
+            _sdController.AddRepeatingCommand(new PauseCommand(2f));
+
+            while (MainRoot.ProjectHarvest.Current._Settings.ackWarning == false) {
+
+                yield return new WaitForSecondsRealtime(0.01f);
+            }
+
+            _sdController.ClearCommandsAndStop();
+            _sdController.AddCommand(new ClearCommand());
+            _sdController.AddCommand(new SetTextCommand("SHARE CRAFTER"));
+            _sdController.AddCommand(new CallbackCommand(brightenUp));
+            _sdController.AddCommand(new PauseCommand(2.5f));
+            _sdController.AddCommand(new SetTextCommand("Starting up"));
+            _sdController.AddCommand(new CallbackCommand(brightenDown));
+            _sdController.AddCommand(new PauseCommand(1f));
+            _sdController.AddCommand(new CallbackCommand(systemReady));
+            _sdController.AddCommand(new ClearCommand());
+        }
+
+        private IEnumerator WaitForStart()
+        {
+            _ackButton.gameObject.SetActive(!MainRoot.ProjectHarvest.Current._Settings.ackWarning);
+            _quitBUtton.gameObject.SetActive(!MainRoot.ProjectHarvest.Current._Settings.ackWarning);
+
+            if (MainRoot.ProjectHarvest != null) {
+                if (MainRoot.ProjectHarvest.Current._Settings.epilepsyWarning) {
+                    yield return new WaitForSecondsRealtime(splashTimer + 1);
+                    _backgrndImage.texture = _epilepsySplash.texture;
+                }
+
+                _warnPanel.gameObject.SetActive(MainRoot.ProjectHarvest.Current._Settings.epilepsyWarning);
+                yield return new WaitUntil(() => MainRoot.ProjectHarvest.Current._Settings.ackWarning);
+            }
+
+            yield return new WaitForSecondsRealtime(splashTimer);
+
+            _warnPanel.gameObject.SetActive(false);
+
+            int rand = MathHelp.ranZEROMAX(_splashScreens.Length - 1);
+            _backgrndImage.texture = _splashScreens[rand].texture;
+
+            yield return new WaitUntil(() => msgCompleted);
+
+            yield return new WaitForSecondsRealtime(splashTimer);
+
+            _backgrndImage.gameObject.SetActive(false);
+            _displayImage.gameObject.SetActive(false);
+            _splashyBack.gameObject.SetActive(false);
+            if (MainRoot.MediaContent != null) {
+                _displayImage.gameObject.SetActive(false);
+                MainRoot.MediaContent.FirstOpen();
+            }
+        }
+
+        private IEnumerator WaitForDebug()
+        {
+            yield return new WaitUntil(() => msgCompleted);
+
+            yield return new WaitForSecondsRealtime(2);
+
+            _backgrndImage.gameObject.SetActive(false);
+            _displayImage.gameObject.SetActive(false);
+            _splashyBack.gameObject.SetActive(false);
+            MainRoot.MediaContent.FirstOpen();
+
+        }
+
+        private IEnumerator WaitForCredits()
+        {
+            string[] fields = File.ReadAllLines(Path.Combine(UnityEngine.Application.streamingAssetsPath, "credits.txt"));
+            string msg = fields != null ? fields.Length.ToString() : "NoFields"; 
+            int index = -1;
+            bool isLeft = true;
+            for (int i = 0; i < fields.Length / 2; ++i) {
+                if (MainRoot.ProjectHarvest.Current._Settings.skipItIn <= 0) break;
+                if (isLeft == true) {
+                    UXCredit credit1 = Instantiate(_uxCreditPrefab, _creditRootL.transform);
+                    StartCoroutine(LerpToPos(credit1, fields[++index], fields[++index]));
+                    isLeft = false;
+                } else {
+                    UXCredit credit2 = Instantiate(_uxCreditPrefab, _creditRootR.transform);
+                    StartCoroutine(LerpToPos(credit2, fields[++index], fields[++index]));
+                    isLeft = true;
+                }
+                yield return new WaitForSecondsRealtime(1.1f);
+            }
+
+            if (MainRoot.ProjectHarvest.Current._Settings.skipItIn > 0)
+                yield return new WaitForSecondsRealtime(1);
+
+            MainRoot.ProjectHarvest.SaveProject();
+
+            StartCoroutine(LerpToAlpha(3, 0));
+
+            if (MainRoot.ExtremeMgr.SplashAudio.IsPlaying == true) {
+                MainRoot.ExtremeMgr.SplashAudio.StopTune();
+            }
+            _watchItToggle.gameObject.SetActive(false);
+
+#if !UNITY_EDITOR
+            //TODOMJB destruction and then test with metrics
+            UnityEngine.Application.Quit();
+#endif
+        }
+
+        private IEnumerator LerpToPos(UXCredit credit, string person, string note)
+        {
+            Vector3 pos1 = credit.transform.position;
+            credit.SetData(person, note);
+            Vector3 new1 = new Vector3(pos1.x, pos1.y - 250, pos1.z);
+
+            float elapsedTime = 0;
+            float waitTime = 4;
+
+            while(elapsedTime < waitTime) {
+                credit.transform.position = Vector3.Lerp(pos1, new1, elapsedTime/waitTime);
+                elapsedTime += Time.smoothDeltaTime;
+                yield return null;
+            }
+
+            credit.transform.position = new1;
+            DestroyImmediate(credit.gameObject);
+        }
+
+        private IEnumerator LerpToAlpha(float start, float end)
+        {
+            float elapsedTime = 0;
+            float waitTime = 3;
+            Color col = _backgrndImage.material.color;
+            col.a = start;
+
+            while (elapsedTime < waitTime) {
+                float val = Mathf.Lerp(start, end, elapsedTime/waitTime);
+                col.a = val;
+                _backgrndImage.material.color = col;
+                elapsedTime += Time.smoothDeltaTime;
+                yield return null;
+            }
+
+            col.a = end;
+            _backgrndImage.material.color = col;
+        }
+
+        private void warningMiddle()
+        {
+            _displayImage.OnColor = Color.yellow;
+        }
+
+        private void warningUp()
+        {
+            _displayImage.OnColor = Color.red;
+        }
+
+        private void brightenUp()
+        {
+            _displayImage.OnColor = Color.cyan;
+        }
+
+        private void brightenDown()
+        {
+            _displayImage.OnColor = Color.white;
+        }
+
+        private void brightenGo()
+        {
+            _displayImage.OnColor = new Color((15.0f/255.0f), (65.0f/255.0f), (39.0f/255.0f), 1f);
+        }
+
+        private void systemReady()
+        {
+            msgCompleted = true;
+            _displayBack.SetActive(false);
+            _displayImage.gameObject.SetActive(false);
+        }
+
+        public enum SplashMode
+        {
+            Main,
+            Epilepsy,
+            Splash
+        }
+    }
+}
